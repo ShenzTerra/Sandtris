@@ -59,8 +59,14 @@ export const SandGame: React.FC = () => {
   const [nextPieceDisplay, setNextPieceDisplay] = useState<Piece | null>(null);
   const [highScore, setHighScore] = useState(() => parseInt(localStorage.getItem('sand-tetris-highscore') || '0'));
 
-  // Repeat interval for hold-to-move logic
+  // Repeat interval for hold-to-move logic (buttons)
   const repeatTimerRef = useRef<number | null>(null);
+
+  // Refs for tracking direct touch screen controls
+  const pointerStartPos = useRef<{ x: number, y: number } | null>(null);
+  const lastPointerMovePos = useRef<{ x: number, y: number } | null>(null);
+  const hasPointerMoved = useRef<boolean>(false);
+  const pointerStartTime = useRef<number>(0);
 
   useEffect(() => {
     setNextPieceDisplay(nextPieceRef.current);
@@ -275,7 +281,56 @@ export const SandGame: React.FC = () => {
     }
   };
 
-  // On-screen control handling with repeat
+  // Direct Screen Pointer Handling
+  const onScreenPointerDown = (e: React.PointerEvent) => {
+    if (isGameOver || isPaused) return;
+    pointerStartPos.current = { x: e.clientX, y: e.clientY };
+    lastPointerMovePos.current = { x: e.clientX, y: e.clientY };
+    pointerStartTime.current = Date.now();
+    hasPointerMoved.current = false;
+  };
+
+  const onScreenPointerMove = (e: React.PointerEvent) => {
+    if (!pointerStartPos.current || isGameOver || isPaused) return;
+    
+    const dx = e.clientX - lastPointerMovePos.current!.x;
+    const dy = e.clientY - lastPointerMovePos.current!.y;
+
+    const thresholdX = 15; // px to trigger move
+    const thresholdY = 20; // px to trigger fast drop
+
+    if (Math.abs(dx) > thresholdX) {
+      move(Math.sign(dx), 0);
+      lastPointerMovePos.current!.x = e.clientX;
+      hasPointerMoved.current = true;
+    }
+
+    if (dy > thresholdY) {
+      move(0, 1);
+      lastPointerMovePos.current!.y = e.clientY;
+      hasPointerMoved.current = true;
+    }
+  };
+
+  const onScreenPointerUp = (e: React.PointerEvent) => {
+    if (!pointerStartPos.current) return;
+    const duration = Date.now() - pointerStartTime.current;
+    
+    // If it was a quick tap with minimal movement, rotate
+    const totalDist = Math.sqrt(
+      Math.pow(e.clientX - pointerStartPos.current.x, 2) +
+      Math.pow(e.clientY - pointerStartPos.current.y, 2)
+    );
+
+    if (duration < 250 && totalDist < 10) {
+      rotate();
+    }
+
+    pointerStartPos.current = null;
+    lastPointerMovePos.current = null;
+  };
+
+  // On-screen control handling for buttons with repeat
   const startRepeat = (fn: () => void, initialDelay = 200, repeatRate = 60) => {
     fn();
     repeatTimerRef.current = window.setTimeout(() => {
@@ -348,24 +403,30 @@ export const SandGame: React.FC = () => {
 
         {/* Center: The Screen */}
         <div className="relative order-2 flex-shrink-0">
-           {/* Arcade Cabinet Frame */}
-           <div className="relative p-2 sm:p-3 bg-slate-800 rounded-lg border-b-4 sm:border-b-8 border-slate-900 shadow-[0_10px_30px_rgba(0,0,0,0.8)] crt-container vignette">
+           {/* Arcade Cabinet Frame with Touch Controls */}
+           <div 
+             className="relative p-2 sm:p-3 bg-slate-800 rounded-lg border-b-4 sm:border-b-8 border-slate-900 shadow-[0_10px_30px_rgba(0,0,0,0.8)] crt-container vignette cursor-pointer"
+             onPointerDown={onScreenPointerDown}
+             onPointerMove={onScreenPointerMove}
+             onPointerUp={onScreenPointerUp}
+             onPointerLeave={onScreenPointerUp}
+           >
               <canvas
                 ref={canvasRef}
                 width={COLS * CELL_SIZE}
                 height={ROWS * CELL_SIZE}
-                className="block bg-black shadow-[inset_0_0_10px_rgba(255,255,255,0.1)] h-[50vh] sm:h-[65vh] w-auto max-h-[500px] sm:max-h-none"
+                className="block bg-black shadow-[inset_0_0_10px_rgba(255,255,255,0.1)] h-[50vh] sm:h-[65vh] w-auto max-h-[500px] sm:max-h-none pointer-events-none"
               />
               
               {/* Overlays */}
               {isPaused && !isGameOver && (
-                <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-40 backdrop-blur-[1px]">
+                <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-40 backdrop-blur-[1px] pointer-events-none">
                    <span className="text-2xl sm:text-4xl font-bold tracking-widest text-white blink drop-shadow-[0_0_10px_#fff]">PAUSED</span>
                 </div>
               )}
 
               {isGameOver && (
-                <div className="absolute inset-0 bg-rose-950/80 flex flex-col items-center justify-center z-50 p-4 sm:p-6 text-center">
+                <div className="absolute inset-0 bg-rose-950/80 flex flex-col items-center justify-center z-50 p-4 sm:p-6 text-center pointer-events-auto">
                    <h2 className="text-3xl sm:text-5xl font-black text-rose-500 drop-shadow-[0_0_15px_#f43f5e] mb-2 sm:mb-4 uppercase">GAME OVER</h2>
                    <p className="text-[10px] sm:text-xs text-rose-200 mb-4 sm:mb-8 uppercase tracking-widest">Score: {score}</p>
                    <button 
@@ -378,6 +439,11 @@ export const SandGame: React.FC = () => {
               )}
            </div>
            
+           {/* Mobile Instructions Overlay (Quick fade out) */}
+           <div className="lg:hidden absolute bottom-4 left-1/2 -translate-x-1/2 pointer-events-none opacity-40 text-[7px] text-white/50 uppercase font-bold tracking-[0.2em] whitespace-nowrap">
+             Slide Screen to Move • Tap to Rotate
+           </div>
+
            {/* Mobile Stats Row */}
            <div className="lg:hidden flex justify-between w-full mt-2 sm:mt-4 px-2">
               <div className="flex flex-col">
@@ -395,7 +461,7 @@ export const SandGame: React.FC = () => {
         <div className="flex flex-col gap-2 sm:gap-4 w-full lg:w-64 order-3 pb-4 sm:pb-8 lg:pb-0">
           <div className="grid grid-cols-3 gap-2 sm:gap-3 max-w-[320px] mx-auto lg:max-w-none w-full px-2">
             <div className="col-start-2">
-              <ArcadeButton onDown={rotate} onUp={() => {}} color="bg-cyan-500" icon={<RotateCw size={24}/>} label="UP" />
+              <ArcadeButton onDown={rotate} onUp={() => {}} color="bg-cyan-500" icon={<RotateCw size={24}/>} label="ROTATE" />
             </div>
             <div className="col-start-1 row-start-2">
               <ArcadeButton onDown={() => startRepeat(() => move(-1, 0))} onUp={stopRepeat} color="bg-slate-600" icon={<ArrowLeft size={24}/>} label="LEFT" />
@@ -419,8 +485,8 @@ export const SandGame: React.FC = () => {
                <h3 className="text-[10px] text-slate-400 font-bold mb-4 flex items-center gap-2 uppercase"><Coins size={12}/> HOW TO PLAY</h3>
                <ul className="text-[8px] space-y-3 leading-relaxed text-slate-500 uppercase">
                  <li>• BRIDGING: CONNECT SAME COLORS FROM LEFT WALL TO RIGHT WALL.</li>
-                 <li>• GRAVITY: PIXELS FLOW LIKE REAL SAND.</li>
-                 <li>• HARD DROP: TAP BOOM TO SMASH.</li>
+                 <li>• CONTROLS: SLIDE SCREEN TO MOVE, TAP TO ROTATE.</li>
+                 <li>• BOOM: TAP RED BUTTON TO SMASH.</li>
                </ul>
             </div>
           </div>
